@@ -1,9 +1,7 @@
-from fastapi import FastAPI, HTTPException
-from common import defines
-import httpx
+from fastapi import FastAPI
 
-messanger_service = FastAPI()
+messenger_service = FastAPI()
 
-@messanger_service.get("/messenger")
-async def compose_data() -> str:
+@messenger_service.get("/messenger", response_model=str)
+def access_messenger() -> str:
     return "[Messenger is not yet implemented]"

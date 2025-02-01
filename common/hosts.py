@@ -1,3 +1,3 @@
-facade_address = "add address here"
-logger_address = "add_address_here"
-messenger_address = "add address here"
+facade_address = "http://localhost:8001"
+logger_address = "http://localhost:8002"
+messenger_address = "http://localhost:8003"
