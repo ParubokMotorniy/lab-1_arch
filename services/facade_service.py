@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
-from common import defines
-from common import hosts
+from ..common import defines
+from ..common import hosts
 import httpx
 import uuid
 

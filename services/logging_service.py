@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException
-from common import defines
+from ..common import defines
 
 stored_messages = dict()
 
