@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.logger import logger
 from ..common import defines
 import httpx
 import uuid
@@ -6,38 +7,43 @@ import os
 
 facade_service = FastAPI()
 
-available_logger_hosts=os.environ["LOG_HOSTS"].strip().split(' ')
-messages_host = os.environ["MESSAGE_HOST"].strip()
+facade_service.state.messages_host = ""
+facade_service.state.config_host = ""
 
-print(f"Static logging hosts: {available_logger_hosts}")
-print(f"Messages host: {messages_host}")
+@facade_service.on_event("startup")
+async def load_config():
+    facade_service.state.messages_host = os.environ["MESSAGE_HOST"].strip()
+    facade_service.state.config_host = os.environ["CONFIG_HOST"].strip()
 
-async def if_logger_alive(logger_url: str, client:  httpx.AsyncClient):
-    print(f"Pinging logger: {logger_url}")
-    ping_response = await client.get(logger_url, timeout=7) #merely pinging a logger
-    print(f"Logger response: {ping_response}")
-    return ping_response.status_code == 200
+    logger.info(f"Messages host: {facade_service.state.messages_host}")
+    logger.info(f"Config host: {facade_service.state.config_host}")
+
+async def get_available_logger(client: httpx.AsyncClient):
+    config_response = await client.get(f"{facade_service.state.config_host}/config/logger_hosts")
+
+    if config_response.status_code != 200:
+        return ""
+    
+    return config_response.text.replace('\"','')
 
 @facade_service.post("/facade")
 async def post_message(plain_msg: defines.SimpleMessage):
-    if not hasattr(post_message, "service_to_try_idx"):
-        post_message.service_to_try_idx = 0
-
-    post_message.service_to_try_idx = (post_message.service_to_try_idx + 1) % len(available_logger_hosts) #to make sure we don't keep sending stuff to a single logger
     new_msg = defines.SimpleTaggedMessage(msg=plain_msg.msg, uuid=str(uuid.uuid4()))
 
-    async with httpx.AsyncClient() as client:  
-        for i in range(len(available_logger_hosts)):
-            logger_to_try = f"{available_logger_hosts[(post_message.service_to_try_idx + i) % len(available_logger_hosts)]}/logger"
-            
-            logger_alive = await if_logger_alive(logger_to_try, client)
+    async with httpx.AsyncClient() as client:
+        try:
+            logger_host = await get_available_logger(client)
 
-            if(logger_alive):
-                logger_to_try += "/store-msg"
-                logger_response = await client.post(logger_to_try, content=new_msg.model_dump_json()) #sending actual message
+            if len(logger_host) != 0:
+                logger.info(f"Storing message to logger: {logger_host}")
+                logger_response = await client.post(
+                    f"{logger_host}/logger/store-msg",
+                    json=new_msg.model_dump(),
+                    timeout=20
+                )
                 return logger_response.status_code
-            
-            print("Logger did not respond")
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=503, detail=f"Failed to send message to config server or logger instance: {e}")
 
     raise HTTPException(status_code=503, detail="No logger services available")
 
@@ -47,24 +53,27 @@ async def get_messages():
     messenger_data = None
 
     async with httpx.AsyncClient() as client:
-        for i in range(len(available_logger_hosts)):
-            logger_to_try = f"{available_logger_hosts[i]}/logger"
-            
-            logger_alive = await if_logger_alive(logger_to_try, client)
+        logger_host = await get_available_logger(client)
 
-            if(logger_alive):
-                logger_to_try += "/get-msgs"
-                logger_data = await client.get(logger_to_try)
-                break
-            
-        messenger_data = await client.get(f"{messages_host}/messenger")
+        if len(logger_host) != 0:
+            try:
+                logger_data = await client.get(f"{logger_host}/logger/get-msgs", timeout=30)
+            except httpx.RequestError as e:
+                logger.warning(f"Failed to fetch messages from {logger_host}: {e}")
 
-    if messenger_data == None or logger_data == None or messenger_data.status_code != 200 or logger_data.status_code != 200:
+        try:
+            messenger_data = await client.get(f"{facade_service.state.messages_host}/messenger", timeout=30)
+        except httpx.RequestError as e:
+            logger.warning(f"Failed to fetch messages from messenger: {e}")
+
+    print(messenger_data, logger_data)
+    if (
+        (messenger_data != None and messenger_data.status_code != 200) or (logger_data != None and logger_data.status_code != 200)
+    ):
         raise HTTPException(status_code=500, detail="Error: Failed to obtain messages!") 
 
-    messenger_str = str(messenger_data.text)
-    logger_messages = defines.SimpleMessageCollection.model_validate_json(logger_data.text).msgs
+    messenger_str = messenger_data.text if messenger_data else ""
+    logger_messages = defines.SimpleMessageCollection.model_validate_json(logger_data.text).msgs if logger_data else []
     logger_messages.append(messenger_str)
 
     return logger_messages
-
