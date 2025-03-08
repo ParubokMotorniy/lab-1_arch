@@ -1,12 +1,17 @@
 #!/bin/sh
-# . ./meow/bin/activate
+
+. ./meow/bin/activate
 
 num_loggers=${1:-1}
 
 num_loggers_created=0
 log_hosts=""
 
-export CLUSTER_NAME="hazelcast-test"
+if [ 1 -lt $# ]; then
+    export CLUSTER_NAME="$2"
+else
+    export CLUSTER_NAME="dev"
+fi
 
 while [ "$num_loggers_created" -lt "$num_loggers" ]; do
     hz start &

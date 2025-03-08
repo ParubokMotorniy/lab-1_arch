@@ -6,7 +6,7 @@ import os
 hz_cluster_name = os.environ["CLUSTER_NAME"]
 hz_client = hazelcast.HazelcastClient(
     cluster_name=hz_cluster_name, 
-) 
+)
 
 hz_map = hz_client.get_map("map-messages").blocking()
 
