@@ -1,5 +1,6 @@
 import consul
 import os
+import json
 
 def register_consul_service(
     service_name: str,
@@ -43,3 +44,20 @@ def query_consul_services(
             hosts.append((service['Address'],service['Port'], service['ID']))
 
     return hosts
+
+def read_value_for_key(
+    key: str
+):
+    c = consul.Consul(host=os.environ['CONSUL_HOST'], port=os.environ['CONSUL_PORT'])
+    
+    index, data = c.kv.get(key)
+    
+    value = None
+    if data and data['Value']:
+        try:
+            value = json.loads(data['Value'].decode())
+        except json.JSONDecodeError as e:
+            print("JSON parsing error occurred!")
+            value = None
+        
+    return value

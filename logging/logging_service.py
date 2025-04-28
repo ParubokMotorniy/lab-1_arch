@@ -4,8 +4,6 @@ from ..common import defines, funcs
 import os
 import subprocess
 
-hz_cluster_name = os.environ["CLUSTER_NAME"]
-
 logger_service = FastAPI()
 logger_service.state.hz_client = None
 logger_service.state.hz_map = None
@@ -27,7 +25,7 @@ async def start_hz():
     logger_service.state.hz_node = subprocess.Popen(["hz", "start"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     logger_service.state.hz_client = hazelcast.HazelcastClient(
-        cluster_name=hz_cluster_name, 
+        **funcs.read_value_for_key("logger_config")
     )
 
     logger_service.state.hz_map = logger_service.state.hz_client.get_map("map-messages").blocking()

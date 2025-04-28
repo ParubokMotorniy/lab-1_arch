@@ -4,17 +4,9 @@ import os
 import threading
 from ..common import funcs
 
-
-kafka_config = {
-    'bootstrap.servers': 'localhost:9092',
-    'group.id':          'kafka-servitor',
-    'auto.offset.reset': 'earliest',
-    'enable.auto.commit' : True
-}
-
 messenger_service = FastAPI()
-kafka_consumer = Consumer(kafka_config)
 
+messenger_service.state.kafka_consumer = None
 messenger_service.state.local_message_map = {} 
 messenger_service.state.kafka_topic = ""
 messenger_service.state.polling_thread = None
@@ -22,7 +14,7 @@ messenger_service.state.polling_thread = None
 def poll_messages():
     while True:
         try:
-            incoming_message = kafka_consumer.poll()
+            incoming_message = messenger_service.state.kafka_consumer.poll()
             
             if incoming_message is None:
                 continue
@@ -32,7 +24,7 @@ def poll_messages():
                 messenger_service.state.local_message_map[incoming_message.key().decode('utf-8')] = incoming_message.value().decode('utf-8') 
                 print(f"Messenger {os.getpid()} received message: {incoming_message.key().decode('utf-8')}:{incoming_message.value().decode('utf-8')}")
                 
-                kafka_consumer.commit(incoming_message)
+                messenger_service.state.kafka_consumer.commit(incoming_message)
         except RuntimeError as e:
             #probably consumer was closed
             print(f"Polling on messenger {os.getpid()} stopped!")
@@ -43,9 +35,12 @@ def poll_messages():
         
 @messenger_service.on_event("startup")
 async def start_messanger():
-    messenger_service.state.kafka_topic = os.environ["MESSAGING_KAFKA_TOPIC"].strip() 
+    messenger_config = funcs.read_value_for_key("messenger_config")
     
-    kafka_consumer.subscribe([messenger_service.state.kafka_topic])
+    messenger_service.state.kafka_topic = messenger_config['topic_name']
+    messenger_service.state.kafka_consumer = Consumer(messenger_config['kafka_config'])
+
+    messenger_service.state.kafka_consumer.subscribe([messenger_service.state.kafka_topic])
     
     port = os.environ["INSTANCE_PORT"]
     funcs.register_consul_service("messenger", port, os.environ["INSTANCE_HOST"], int(port), 30, 60, "/health" )
@@ -57,7 +52,7 @@ async def start_messanger():
     
 @messenger_service.on_event("shutdown")
 async def terminate_messenger():
-    kafka_consumer.close()
+    messenger_service.state.kafka_consumer.close()
     print(f"Messenger {os.getpid()} terminated!")
     
 @messenger_service.get("/health")

@@ -7,14 +7,9 @@ import uuid
 import os
 import numpy as np
 
-kafka_config = {
-    'bootstrap.servers': 'localhost:9092',
-    'acks': 'all'
-}
-
 facade_service = FastAPI()
-kafka_producer = Producer(kafka_config)
 
+facade_service.state.kafka_producer = None
 facade_service.state.messaging_topic = ""
 
 def delivery_callback(err, msg):
@@ -25,7 +20,11 @@ def delivery_callback(err, msg):
 
 @facade_service.on_event("startup")
 async def load_config():
-    facade_service.state.messaging_topic = os.environ["MESSAGING_KAFKA_TOPIC"].strip()
+    facade_config = funcs.read_value_for_key("facade_config")
+    
+    facade_service.state.messaging_topic = facade_config['topic_name']
+    facade_service.state.kafka_producer = Producer(facade_config['kafka_config'])
+    
     funcs.register_consul_service("facade", "0", os.environ["INSTANCE_HOST"], int(os.environ["INSTANCE_PORT"]), 30, 60, "/health" )
 
     print(f"Facade service {os.getpid()} started!")
@@ -65,12 +64,12 @@ async def post_message(plain_msg: defines.SimpleMessage):
 
     #forwarding to messages service
     try:
-        kafka_producer.produce(facade_service.state.messaging_topic, new_msg.msg, new_msg.uuid, callback=delivery_callback)
+        facade_service.state.kafka_producer.produce(facade_service.state.messaging_topic, new_msg.msg, new_msg.uuid, callback=delivery_callback)
     except Exception as e:
         raise HTTPException(status_code=503, detail="Failed to forward message to messages service!")
         
-    kafka_producer.poll(100)
-    kafka_producer.flush()
+    facade_service.state.kafka_producer.poll(100)
+    facade_service.state.kafka_producer.flush()
 
     #forwarding to logger
     async with httpx.AsyncClient() as client:
